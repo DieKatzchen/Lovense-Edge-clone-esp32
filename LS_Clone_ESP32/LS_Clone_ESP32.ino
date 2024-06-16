@@ -2,25 +2,25 @@
 #include <BLEUtils.h>
 #include <BLEServer.h>
 #include <BLE2902.h>
-#include <SPI.h>
-#include "DFRobot_MAX17043.h" // https://github.com/DFRobot/DFRobot_MAX17043
-#include "Wire.h"
+//#include <SPI.h>
+//#include "DFRobot_MAX17043.h" // https://github.com/DFRobot/DFRobot_MAX17043
+//#include "Wire.h"
 BLEServer* pServer = NULL;
 BLECharacteristic* pTxCharacteristic = NULL;
 BLECharacteristic* pRxCharacteristic = NULL;
-DFRobot_MAX17043        gauge;
 //CONFIG
-#define bleAddress "0082059AD3BD" // CONFIGURATION: < Use a real Lovense Edge BLE address here or use a Genertate one using a MAC address generator
-#define Device_Type            "P:37:0082059AD3BD" // < Toy Type:FW Version:bleAdress
+#define bleAddress "1A7EEADFF188" // CONFIGURATION: < Use a real Lovense Edge BLE address here or use a Genertate one using a MAC address generator
+#define Device_Type            "P:37:1A7EEADFF188" // < Toy Type:FW Version:bleAdress
 #define Batch                  "220123" //Production Date, yymmdd, currently Set to my birthday day this year
 //pins
-#define LED  10
-#define MA_PWM   5  
-#define MA_DIR   4  
-#define MB_PWM   1
-#define MB_DIR   0
+#define LED  LED_BUILTIN
+#define IN1   5  
+#define IN3   6
+
+//DFRobot_MAX17043 gauge;
+
 // Don't touch these unless you know what you a doing
-#define btname                 "LVS-"  
+#define btname                 "LVS-Edge36"  
 #define SERVICE_UUID           "50300001-0023-4bd4-bbd5-a6920e4c5653"
 #define CHARACTERISTIC_RX_UUID "50300002-0023-4bd4-bbd5-a6920e4c5653"
 #define CHARACTERISTIC_TX_UUID "50300003-0023-4bd4-bbd5-a6920e4c5653"
@@ -34,16 +34,12 @@ void V (int M)
 {
     int Speed = round(12.75*vibration);
     if (M == 1) {
-    ledcWrite(1,Speed);
-    digitalWrite(MA_DIR,LOW);
+      ledcWrite(IN1,Speed);
     } else if (M == 2){
-    ledcWrite(2,Speed);
-    digitalWrite(MB_DIR,LOW);
+      ledcWrite(IN3,Speed);
     } else {
-    ledcWrite(1,Speed);
-    digitalWrite(MA_DIR,LOW);
-    ledcWrite(2,Speed);
-    digitalWrite(MB_DIR,LOW);
+      ledcWrite(IN1,Speed);
+      ledcWrite(IN3,Speed);
     }
 }
 class MyServerCallbacks: public BLEServerCallbacks {
@@ -60,25 +56,30 @@ class MySerialCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
       static uint8_t messageBuf[64];
       assert(pCharacteristic == pRxCharacteristic);
-      std::string rxValue = pRxCharacteristic->getValue();
+      std::string rxValue(pRxCharacteristic->getValue().c_str());
       
-      if (rxValue.length() > 0) {
-        Serial.println("*********");
-        Serial.print("Received Value: ");
-        for (int i = 0; i < rxValue.length(); i++)
-          Serial.print(rxValue[i]);
+      //if (rxValue.length() > 0) {
+        //Serial.println("*********");
+        //Serial.print("Received Value: ");
+        //for (int i = 0; i < rxValue.length(); i++)
+          //Serial.print(rxValue[i]);
 
-        Serial.println();
-        Serial.println("*********");
-      }
+        //Serial.println();
+        //Serial.println("*********");
+      //}
       if (rxValue == "DeviceType;") { 
         memmove(messageBuf, Device_Type, 18);
         pTxCharacteristic->setValue(messageBuf, 18);
         pTxCharacteristic->notify();
       } else if (rxValue == "Battery;") {
         char bat[3];
-        dtostrf(gauge.readPercentage(), 2,0, bat);
-        bat[3] = ';';
+        #ifdef BATT_GUAGE
+          dtostrf(gauge.readPercentage(), 2,0, bat);
+        #else
+          bat[0] = '9';
+          bat[1] = '9';        
+        #endif
+        bat[2] = ';';
         memmove(messageBuf, bat, 3);
         pTxCharacteristic->setValue(messageBuf, 3);
         pTxCharacteristic->notify();
@@ -122,22 +123,21 @@ class MySerialCallbacks: public BLECharacteristicCallbacks {
 };
 
 void setup() {
-  Serial.begin(115200);
+  //Serial.begin(115200);
 
-  SPI.begin();
-  while(gauge.begin() != 0) {
-    Serial.println("gauge begin faild!");
-    delay(2000);
-  }
-  delay(2);
-  Serial.println("gauge begin successful!");
-
-  ledcSetup(1, 1000, 8);
-  ledcSetup(2, 1000, 8);
-  ledcAttachPin(MA_PWM, 1);
-  ledcAttachPin(MB_PWM, 2);
-  pinMode(MA_DIR, OUTPUT);
-  pinMode(MB_DIR, OUTPUT);
+    //SPI.begin();
+    //while(gauge.begin() != 0) {
+      //Serial.println("gauge begin faild!");
+    //  delay(2000);
+    //}
+    //delay(2);
+    //Serial.println("gauge begin successful!");
+  ledcAttach(IN1,1000,8);
+  ledcAttach(IN3,1000,8);
+  //ledcSetup(1, 1000, 8);
+  //ledcSetup(2, 1000, 8);
+  //ledcAttachPin(MA_PWM, 1);
+  //ledcAttachPin(MB_PWM, 2);
   pinMode(LED,OUTPUT);
   BLEDevice::init(btname);
   pServer = BLEDevice::createServer();
@@ -160,24 +160,25 @@ void setup() {
   pAdvertising->setScanResponse(false);
   pAdvertising->setMinPreferred(0x0);  // set value to 0x00 to not advertise this parameter
   BLEDevice::startAdvertising();
-  Serial.println("Waiting a client connection to notify...");
+  //Serial.println("Waiting a client connection to notify...");
 }
+
 void loop() {
   if (!deviceConnected){
-        digitalWrite(LED,HIGH);
-        delay(1000);
-        digitalWrite(LED,LOW);
-        delay(1000);
-      } 
-      if (deviceConnected && !oldDeviceConnected) {
-        oldDeviceConnected = deviceConnected;
-        digitalWrite(LED,HIGH);
-    }
-      if (!deviceConnected && oldDeviceConnected) {
-        delay(100); // give the bluetooth stack the chance to get things ready
-        pServer->startAdvertising(); // restart advertising
-        Serial.println("start advertising");
-        oldDeviceConnected = deviceConnected;
-        digitalWrite(LED,LOW);
-    }
-    }
+    digitalWrite(LED,HIGH);
+    delay(1000);
+    digitalWrite(LED,LOW);
+    delay(1000);
+  } 
+  if (deviceConnected && !oldDeviceConnected) {
+    oldDeviceConnected = deviceConnected;
+    digitalWrite(LED,HIGH);
+  }
+  if (!deviceConnected && oldDeviceConnected) {
+    delay(100); // give the bluetooth stack the chance to get things ready
+    pServer->startAdvertising(); // restart advertising
+    //Serial.println("start advertising");
+    oldDeviceConnected = deviceConnected;
+    digitalWrite(LED,LOW);
+  }
+}
